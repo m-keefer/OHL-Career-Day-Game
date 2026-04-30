@@ -43,6 +43,44 @@
       z-index: 10;
       letter-spacing: 4px;
     }
+
+    /* Emoji HTML layer — sits above canvas so Safari renders full colour */
+    #emoji-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 2;
+    }
+    #emoji-layer span {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      line-height: 1;
+      display: block;
+    }
+
+    /* Game-over screen — pure HTML so emoji always render in colour */
+    #game-over-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 8;
+      pointer-events: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    #game-over-screen.active { display: flex; }
+    .go-face   { font-size: clamp(72px, 14vw, 120px); line-height: 1; }
+    .go-title  { font-size: clamp(2rem, 8vw, 5rem); font-weight: 900;
+                 font-family: "Arial Rounded MT Bold", Arial, sans-serif;
+                 color: #fff; text-shadow: 0 4px 0 rgba(0,0,0,0.35); }
+    .go-caught { font-size: clamp(1.1rem, 4vw, 2rem); font-weight: bold;
+                 font-family: "Arial Rounded MT Bold", Arial, sans-serif;
+                 color: #ffe066; }
+    .go-hint   { font-size: clamp(0.85rem, 2.5vw, 1.3rem);
+                 color: rgba(255,255,255,0.85); font-family: Arial, sans-serif; }
   </style>
 </head>
 <body>
@@ -51,14 +89,23 @@
 <div id="lives">❤️❤️❤️</div>
 <canvas id="c"></canvas>
 
+<!-- Emoji live here so Safari renders them in full colour -->
+<div id="emoji-layer"></div>
+<div id="game-over-screen">
+  <div class="go-face">😢</div>
+  <div class="go-title">GAME OVER!</div>
+  <div class="go-caught" id="go-caught-text"></div>
+  <div class="go-hint">Tap or press any key to play again!</div>
+</div>
+
 <script>
 // ╔══════════════════════════════════════════════╗
 //  CHANGE THESE to customize the game!
 // ╚══════════════════════════════════════════════╝
-const BACKGROUND   = "ocean"; // sky | ocean | space | jungle
-const PLAYER_EMOJI = "🦄";    // any emoji — try 🐸  🚀  🧒  🐱
-const ITEM_EMOJI   = "🌷";    // any emoji — try 🍎  🎈  💎  🍩
-const FALL_SPEED   = 2;       // 1 = slow  |  5 = fast  |  8 = chaos
+const BACKGROUND   = "space"; // sky | ocean | space | jungle
+const PLAYER_EMOJI = "🤖";    // any emoji — try 🐸  🚀  🧒  🐱
+const ITEM_EMOJI   = "🍩";    // any emoji — try 🍎  🎈  💎  🌷
+const FALL_SPEED   = 1;       // 1 = slow  |  5 = fast  |  8 = chaos
 
 // ── Canvas ────────────────────────────────────────────────────────────────
 const canvas = document.getElementById("c");
@@ -213,6 +260,11 @@ window.addEventListener("keydown", e => {
 });
 window.addEventListener("keyup",   e => { keys[e.key] = false; });
 
+// ── Mouse input ───────────────────────────────────────────────────────────
+let mouseX = null;
+canvas.addEventListener("mousemove",  e => { mouseX = e.clientX; });
+canvas.addEventListener("mouseleave", () => { mouseX = null; });
+
 // ── Touch input (mobile / tablet) ─────────────────────────────────────────
 let touchX = null;
 canvas.addEventListener("touchstart", e => {
@@ -227,15 +279,24 @@ canvas.addEventListener("touchmove", e => {
 canvas.addEventListener("touchend",   () => { touchX = null; });
 canvas.addEventListener("click",      () => { if (gameOver) restart(); });
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-// Draw an emoji centered at (x, y) with given font size
+// ── Emoji HTML layer ──────────────────────────────────────────────────────
+// Safari cannot render colour emoji via canvas fillText, so we buffer all
+// emoji calls and flush them to a positioned HTML overlay each frame instead.
+const emojiLayer  = document.getElementById("emoji-layer");
+const goScreen    = document.getElementById("game-over-screen");
+const goCaught    = document.getElementById("go-caught-text");
+let   emojiBuffer = [];
+
+// Queue an emoji to be rendered as an HTML span (called like before)
 function emoji(e, x, y, size) {
-  ctx.save();
-  ctx.font         = `${size}px serif`;
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(e, x, y);
-  ctx.restore();
+  emojiBuffer.push(
+    `<span style="left:${Math.round(x)}px;top:${Math.round(y)}px;font-size:${size}px">${e}</span>`
+  );
+}
+
+// Write the queued emoji to the DOM — called once per frame at end of loop
+function flushEmojiLayer() {
+  emojiLayer.innerHTML = emojiBuffer.join("");
 }
 
 // ── Fluffy cloud helper ───────────────────────────────────────────────────
@@ -350,12 +411,130 @@ function drawOceanBackground(W, H) {
   emoji("🐳", W*0.27, H*0.82, 58);
 }
 
+// ── Full space scene ──────────────────────────────────────────────────────
+function drawSpaceBackground(W, H) {
+
+  // Deep space gradient — near-black top → deep purple mid → dark navy bottom
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0.00, "#04041a");
+  bg.addColorStop(0.45, "#1a0533");
+  bg.addColorStop(1.00, "#0a1a4a");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Soft nebula glows (three radial blobs of colour)
+  const nebulas = [
+    { x: 0.28, y: 0.38, r: 0.38, c: "rgba(140,0,200,0.13)"  },
+    { x: 0.72, y: 0.55, r: 0.30, c: "rgba(0,120,220,0.12)"  },
+    { x: 0.50, y: 0.18, r: 0.25, c: "rgba(200,50,100,0.10)" },
+  ];
+  for (const n of nebulas) {
+    const ng = ctx.createRadialGradient(n.x*W, n.y*H, 0, n.x*W, n.y*H, n.r*W);
+    ng.addColorStop(0, n.c);
+    ng.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = ng;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Stars — tinted white / warm / blue / pink for variety
+  const starTints = ["#ffffff","#ffe8a0","#a0c8ff","#ffaacc"];
+  for (const s of stars) {
+    ctx.save();
+    ctx.globalAlpha = s.a;
+    ctx.fillStyle   = starTints[Math.floor(s.x * starTints.length) % starTints.length];
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * (H * 0.88), s.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Saturn-like planet (top-right)
+  const px = W * 0.74, py = H * 0.17;
+  const pr = Math.min(W, H) * 0.075;
+
+  // Back half of rings (drawn first, then planet covers it)
+  ctx.save();
+  ctx.translate(px, py); ctx.rotate(-0.25);
+  ctx.strokeStyle = "rgba(255,210,120,0.55)";
+  ctx.lineWidth   = pr * 0.28;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, pr * 2.0, pr * 0.45, 0, Math.PI, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Planet body with radial gradient + subtle band stripes
+  const pg = ctx.createRadialGradient(px - pr*0.3, py - pr*0.25, pr*0.05, px, py, pr);
+  pg.addColorStop(0,   "#ffe080");
+  pg.addColorStop(0.5, "#ff8c2a");
+  pg.addColorStop(1,   "#8b2500");
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save(); ctx.globalAlpha = 0.13; ctx.fillStyle = "#fff";
+  for (let b = 0; b < 4; b++) {
+    ctx.beginPath();
+    ctx.ellipse(px, py - pr*0.38 + b*pr*0.27, pr*0.88, pr*0.07, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Front half of rings (drawn on top of planet)
+  ctx.save();
+  ctx.translate(px, py); ctx.rotate(-0.25);
+  ctx.strokeStyle = "rgba(255,210,120,0.55)";
+  ctx.lineWidth   = pr * 0.28;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, pr * 2.0, pr * 0.45, 0, 0, Math.PI);
+  ctx.stroke();
+  ctx.restore();
+
+  // Crescent moon (top-left)
+  const mx = W * 0.14, my = H * 0.13;
+  const mr = Math.min(W, H) * 0.042;
+  ctx.fillStyle = "#fff8d0";
+  ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#04041a"; // same as sky top — carves out the crescent
+  ctx.beginPath(); ctx.arc(mx + mr*0.38, my - mr*0.08, mr*0.80, 0, Math.PI * 2); ctx.fill();
+
+  // Moon-surface ground
+  const groundH = 62;
+  const mg = ctx.createLinearGradient(0, H - groundH, 0, H);
+  mg.addColorStop(0, "#6a6a7a");
+  mg.addColorStop(1, "#3a3a4a");
+  ctx.fillStyle = mg;
+  ctx.fillRect(0, H - groundH, W, groundH);
+
+  // Craters on the ground
+  const craters = [
+    { rx:0.10, s:18 }, { rx:0.33, s:13 }, { rx:0.55, s:21 },
+    { rx:0.72, s:11 }, { rx:0.88, s:16 },
+  ];
+  for (const c of craters) {
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth   = c.s * 0.25;
+    ctx.beginPath();
+    ctx.ellipse(c.rx * W, H - groundH * 0.5, c.s, c.s * 0.38, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Emoji decorations
+  emoji("🚀", W*0.08, H*0.38, 52);
+  emoji("🛸", W*0.58, H*0.46, 48);
+  emoji("🌠", W*0.38, H*0.20, 44);
+  emoji("💫", W*0.88, H*0.34, 38);
+  emoji("☄️", W*0.22, H*0.54, 44);
+  emoji("👾", W*0.86, H*0.70, 44);
+  emoji("🔭", W*0.04, H*0.87, 44);
+  emoji("🌌", W*0.48, H*0.64, 56);
+}
+
 // ── Draw background ───────────────────────────────────────────────────────
 function drawBackground() {
   const W = canvas.width, H = canvas.height;
 
-  // Ocean gets its own rich scene — skip the generic path
+  // Ocean / space each get their own rich scene — skip the generic path
   if (BACKGROUND === "ocean") { drawOceanBackground(W, H); return; }
+  if (BACKGROUND === "space") { drawSpaceBackground(W, H); return; }
 
   // Sky / water gradient (supports optional mid-stop for richer scenes)
   const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -395,7 +574,7 @@ function spawnItem() {
   items.push({
     x: fromBoat ? boat.x : margin + Math.random() * (canvas.width - margin * 2),
     y: fromBoat ? boat.y + boat.size / 2 : -36,
-    size: 54,
+    size: 64,
   });
 }
 
@@ -414,7 +593,10 @@ function update() {
   if (keys["ArrowLeft"])  player.x -= player.speed;
   if (keys["ArrowRight"]) player.x += player.speed;
 
-  // Smooth follow toward touch position
+  // Mouse — player tracks the cursor directly
+  if (mouseX !== null) player.x = mouseX;
+
+  // Touch — smooth follow toward finger position
   if (touchX !== null) {
     const diff = touchX - player.x;
     player.x += Math.sign(diff) * Math.min(Math.abs(diff), player.speed * 2);
@@ -509,31 +691,12 @@ function draw() {
 
 // ── Game over overlay ─────────────────────────────────────────────────────
 function drawGameOver() {
-  const W = canvas.width, H = canvas.height;
-
-  // Dark translucent overlay
-  ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
-  ctx.fillRect(0, 0, W, H);
-
-  // Sad face
-  emoji("😢", W / 2, H / 2 - 90, 110);
-
-  // "GAME OVER" heading
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "middle";
-  ctx.font         = `bold ${Math.min(72, W / 9)}px "Arial Rounded MT Bold", Arial`;
-  ctx.fillStyle    = "#fff";
-  ctx.fillText("GAME OVER!", W / 2, H / 2 + 15);
-
-  // Final score
-  ctx.font      = `bold ${Math.min(40, W / 14)}px "Arial Rounded MT Bold", Arial`;
-  ctx.fillStyle = "#ffe066";
-  ctx.fillText(`You caught ${score} ${ITEM_EMOJI}`, W / 2, H / 2 + 75);
-
-  // Replay prompt
-  ctx.font      = `${Math.min(26, W / 22)}px Arial`;
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.fillText("Tap or press any key to play again!", W / 2, H / 2 + 135);
+  // Dark canvas overlay (geometry only — text/emoji are in the HTML screen)
+  ctx.fillStyle = "rgba(0,0,0,0.62)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Show HTML game-over screen (always colour, works on every browser)
+  goCaught.textContent = `You caught ${score} ${ITEM_EMOJI}`;
+  goScreen.classList.add("active");
 }
 
 // ── Restart ───────────────────────────────────────────────────────────────
@@ -546,13 +709,19 @@ function restart() {
   player.x   = canvas.width / 2;
   scoreEl.textContent = `${ITEM_EMOJI} 0`;
   updateLives();
+  goScreen.classList.remove("active");
 }
 
 // ── Game loop ─────────────────────────────────────────────────────────────
 function loop() {
+  emojiBuffer = [];          // reset emoji queue each frame
   if (!gameOver) update();
-  draw();
-  if (gameOver) drawGameOver();
+  draw();                    // canvas geometry + queues emoji
+  if (gameOver) {
+    drawGameOver();          // canvas dark overlay + show HTML screen
+    emojiBuffer = [];        // drop queued emoji so they don't float above overlay
+  }
+  flushEmojiLayer();         // write emoji queue to DOM
   requestAnimationFrame(loop);
 }
 
