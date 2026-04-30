@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Catch the Stars!</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; }
+    canvas { display: block; }
+
+    /* Score banner at the top */
+    #score {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 2.8rem;
+      font-weight: 900;
+      font-family: "Arial Rounded MT Bold", Arial, sans-serif;
+      color: #fff;
+      text-shadow: 0 3px 0 rgba(0,0,0,0.25), 0 0 20px rgba(0,0,0,0.15);
+      pointer-events: none;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    /* Lives display — top-right corner */
+    #lives {
+      position: fixed;
+      top: 16px;
+      right: 24px;
+      font-size: 2.2rem;
+      pointer-events: none;
+      z-index: 10;
+      letter-spacing: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="score">⭐ 0</div>
+<div id="lives">❤️❤️❤️</div>
+<canvas id="c"></canvas>
+
+<script>
+// ╔══════════════════════════════════════════════╗
+//  CHANGE THESE to customize the game!
+// ╚══════════════════════════════════════════════╝
+const BACKGROUND   = "ocean"; // sky | ocean | space | jungle
+const PLAYER_EMOJI = "🦄";    // any emoji — try 🐸  🚀  🧒  🐱
+const ITEM_EMOJI   = "🌷";    // any emoji — try 🍎  🎈  💎  🍩
+const FALL_SPEED   = 2;       // 1 = slow  |  5 = fast  |  8 = chaos
+
+// ── Canvas ────────────────────────────────────────────────────────────────
+const canvas = document.getElementById("c");
+const ctx    = canvas.getContext("2d");
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+// ── Background themes ─────────────────────────────────────────────────────
+// Each theme has a sky gradient, a ground color, and scenery decorations.
+const THEMES = {
+  sky: {
+    top:    "#5bc8f5",
+    bottom: "#d0f0ff",
+    ground: "#6ecf68",
+    deco: [
+      { e:"☁️",  rx:0.10, ry:0.12, s:48 },
+      { e:"☁️",  rx:0.38, ry:0.07, s:56 },
+      { e:"🌤️", rx:0.65, ry:0.10, s:52 },
+      { e:"☁️",  rx:0.82, ry:0.18, s:44 },
+      { e:"🌈",  rx:0.50, ry:0.30, s:72 },
+      { e:"🌻",  rx:0.05, ry:0.90, s:40 },
+      { e:"🌻",  rx:0.92, ry:0.90, s:40 },
+      { e:"🐦",  rx:0.25, ry:0.22, s:32 },
+    ],
+  },
+  ocean: {
+    top:    "#ffe066",   // sunny yellow sky at the very top
+    mid:    "#00cfff",   // bright tropical surface water
+    midAt:  0.22,        // sky-to-water horizon sits ~22% down
+    bottom: "#0047ab",   // deep cobalt ocean at the bottom
+    ground: "#f5d17a",   // warm sandy beach
+    deco: [
+      // sky
+      { e:"☀️",  rx:0.88, ry:0.06, s:58 },
+      { e:"☁️",  rx:0.12, ry:0.08, s:52 },
+      { e:"☁️",  rx:0.45, ry:0.05, s:44 },
+      // wave band
+      { e:"🌊",  rx:0.05, ry:0.26, s:56 },
+      { e:"🌊",  rx:0.38, ry:0.23, s:48 },
+      { e:"🌊",  rx:0.70, ry:0.27, s:52 },
+      // sea creatures in the water
+      { e:"🐬",  rx:0.20, ry:0.42, s:52 },
+      { e:"🐠",  rx:0.78, ry:0.50, s:44 },
+      { e:"🐡",  rx:0.55, ry:0.38, s:40 },
+      { e:"🐢",  rx:0.35, ry:0.62, s:44 },
+      { e:"🐙",  rx:0.80, ry:0.72, s:46 },
+      // sea floor
+      { e:"🪸",  rx:0.08, ry:0.88, s:42 },
+      { e:"🪸",  rx:0.60, ry:0.90, s:38 },
+      { e:"🦀",  rx:0.88, ry:0.90, s:40 },
+      { e:"🐚",  rx:0.42, ry:0.91, s:34 },
+    ],
+  },
+  space: {
+    top:    "#05050f",
+    bottom: "#1a1050",
+    ground: "#555",
+    deco: [
+      { e:"🌙",  rx:0.12, ry:0.10, s:56 },
+      { e:"🪐",  rx:0.72, ry:0.14, s:64 },
+      { e:"🌠",  rx:0.40, ry:0.08, s:44 },
+      { e:"🛸",  rx:0.55, ry:0.30, s:50 },
+      { e:"💫",  rx:0.22, ry:0.28, s:36 },
+      { e:"✨",  rx:0.85, ry:0.22, s:32 },
+      { e:"🔭",  rx:0.06, ry:0.88, s:42 },
+      { e:"🌌",  rx:0.50, ry:0.55, s:72 },
+    ],
+  },
+  jungle: {
+    top:    "#1a5c1a",
+    bottom: "#a8e063",
+    ground: "#7a4515",
+    deco: [
+      { e:"🌴",  rx:0.03, ry:0.70, s:72 },
+      { e:"🌴",  rx:0.90, ry:0.65, s:80 },
+      { e:"🌺",  rx:0.20, ry:0.75, s:40 },
+      { e:"🌿",  rx:0.60, ry:0.80, s:44 },
+      { e:"🦜",  rx:0.45, ry:0.20, s:48 },
+      { e:"🦋",  rx:0.75, ry:0.35, s:36 },
+      { e:"🐸",  rx:0.30, ry:0.85, s:38 },
+      { e:"🍃",  rx:0.55, ry:0.12, s:52 },
+    ],
+  },
+};
+
+const theme = THEMES[BACKGROUND] || THEMES.sky;
+
+// ── Starfield for space ───────────────────────────────────────────────────
+const stars = [];
+if (BACKGROUND === "space") {
+  for (let i = 0; i < 120; i++) {
+    stars.push({
+      x: Math.random(),
+      y: Math.random() * 0.85,
+      r: 0.5 + Math.random() * 2,
+      a: 0.4 + Math.random() * 0.6,
+    });
+  }
+}
+
+// ── Water sparkles for ocean ──────────────────────────────────────────────
+const sparkles = [];
+if (BACKGROUND === "ocean") {
+  for (let i = 0; i < 40; i++) {
+    sparkles.push({
+      x: Math.random(),          // 0-1 relative to width
+      y: Math.random(),          // 0-1 relative to sparkle band
+      w: 3 + Math.random() * 10, // ellipse half-width
+    });
+  }
+}
+
+// ── Player ────────────────────────────────────────────────────────────────
+const player = {
+  x: 0,        // starts at center, set before first frame
+  size: 54,    // emoji display size (px)
+  speed: 7,    // pixels per frame
+};
+
+// ── Falling items & effects ───────────────────────────────────────────────
+let items    = [];
+let splashes = []; // wave rings that appear on each catch
+let spawnTimer = 0;
+
+// Sailboat that sails across the top and drops items (ocean theme)
+const boat = { x: 100, y: 0, size: 64, speed: 1.5 };
+// Spawn faster when FALL_SPEED is higher so it stays challenging
+const SPAWN_EVERY = Math.max(30, 90 - FALL_SPEED * 8); // frames
+
+// ── Score & lives ─────────────────────────────────────────────────────────
+let score = 0;
+let lives = 3;
+let gameOver = false;
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+
+function updateLives() {
+  livesEl.textContent = "❤️".repeat(lives);
+}
+
+// ── Keyboard input ────────────────────────────────────────────────────────
+const keys = {};
+window.addEventListener("keydown", e => {
+  if (gameOver) { restart(); return; }
+  keys[e.key] = true;
+  e.preventDefault();
+});
+window.addEventListener("keyup",   e => { keys[e.key] = false; });
+
+// ── Touch input (mobile / tablet) ─────────────────────────────────────────
+let touchX = null;
+canvas.addEventListener("touchstart", e => {
+  if (gameOver) { restart(); return; }
+  touchX = e.touches[0].clientX;
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener("touchmove", e => {
+  touchX = e.touches[0].clientX;
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener("touchend",   () => { touchX = null; });
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+// Draw an emoji centered at (x, y) with given font size
+function emoji(e, x, y, size) {
+  ctx.save();
+  ctx.font         = `${size}px serif`;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(e, x, y);
+  ctx.restore();
+}
+
+// ── Fluffy cloud helper ───────────────────────────────────────────────────
+function drawCloud(cx, cy, r) {
+  const puffs = [
+    [cx,          cy,          r * 0.55],
+    [cx + r*0.55, cy - r*0.20, r * 0.48],
+    [cx + r*1.10, cy,          r * 0.52],
+    [cx + r*0.28, cy + r*0.28, r * 0.42],
+    [cx + r*0.82, cy + r*0.28, r * 0.40],
+  ];
+  ctx.fillStyle = "rgba(255,255,255,0.96)";
+  ctx.beginPath();
+  for (const [px, py, pr] of puffs) {
+    ctx.moveTo(px + pr, py);
+    ctx.arc(px, py, pr, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+// ── Full ocean scene (replaces generic gradient for ocean theme) ──────────
+function drawOceanBackground(W, H) {
+  const skyH = H * 0.34; // horizon — sky above, water below
+
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, skyH);
+  skyGrad.addColorStop(0, "#1a9ede");
+  skyGrad.addColorStop(1, "#a8e4f7");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, skyH);
+
+  // Sun glow + body + rays
+  const sx = W * 0.80, sy = H * 0.09;
+  const sr = Math.max(22, Math.min(W, H) * 0.052);
+  ctx.fillStyle = "rgba(255,230,40,0.18)";
+  ctx.beginPath(); ctx.arc(sx, sy, sr * 2.4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#FFE433";
+  ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "#FFD700";
+  ctx.lineWidth = Math.max(2, sr * 0.18);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 8;
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(a) * sr * 1.38, sy + Math.sin(a) * sr * 1.38);
+    ctx.lineTo(sx + Math.cos(a) * sr * 1.95, sy + Math.sin(a) * sr * 1.95);
+    ctx.stroke();
+  }
+
+  // Clouds
+  drawCloud(W * 0.10, H * 0.07, W * 0.10);
+  drawCloud(W * 0.43, H * 0.04, W * 0.09);
+  drawCloud(W * 0.61, H * 0.12, W * 0.08);
+
+  // Water body with wavy top edge
+  const waterGrad = ctx.createLinearGradient(0, skyH, 0, H);
+  waterGrad.addColorStop(0.00, "#00d0f0");
+  waterGrad.addColorStop(0.25, "#0088cc");
+  waterGrad.addColorStop(1.00, "#00307a");
+  ctx.fillStyle = waterGrad;
+  const nw = 10, ww = W / nw;
+  ctx.beginPath();
+  ctx.moveTo(0, skyH);
+  for (let i = 0; i < nw; i++) {
+    ctx.quadraticCurveTo(i * ww + ww / 2, skyH - 14, (i + 1) * ww, skyH);
+  }
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fill();
+
+  // White wave highlights near the surface
+  ctx.lineWidth = 2.5;
+  for (let row = 0; row < 3; row++) {
+    const wy = skyH + row * 22 + 10;
+    ctx.strokeStyle = `rgba(255,255,255,${0.55 - row * 0.14})`;
+    ctx.beginPath();
+    ctx.moveTo(0, wy);
+    for (let i = 0; i < nw; i++) {
+      ctx.quadraticCurveTo(i * ww + ww / 2, wy - 8, (i + 1) * ww, wy);
+    }
+    ctx.stroke();
+  }
+
+  // Sun-glitter sparkles on the water
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  for (const sp of sparkles) {
+    ctx.beginPath();
+    ctx.ellipse(sp.x * W, skyH + 28 + sp.y * H * 0.22, sp.w, 1.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Sandy beach at the bottom
+  const sandGrad = ctx.createLinearGradient(0, H - 52, 0, H);
+  sandGrad.addColorStop(0, "#f7d97a");
+  sandGrad.addColorStop(1, "#e6b84a");
+  ctx.fillStyle = sandGrad;
+  ctx.fillRect(0, H - 52, W, 52);
+
+  // Emoji sea creatures + seabed items
+  emoji("🐬", W*0.18, H*0.48, 52);
+  emoji("🐠", W*0.76, H*0.54, 44);
+  emoji("🐡", W*0.53, H*0.42, 40);
+  emoji("🐢", W*0.33, H*0.65, 44);
+  emoji("🐙", W*0.82, H*0.74, 46);
+  emoji("🪸", W*0.08, H*0.90, 44);
+  emoji("🪸", W*0.60, H*0.92, 40);
+  emoji("🦀", W*0.88, H*0.92, 42);
+  emoji("🐚", W*0.44, H*0.93, 36);
+  // extra animals
+  emoji("🦈", W*0.65, H*0.38, 50);
+  emoji("🐟", W*0.04, H*0.58, 40);
+  emoji("🦭", W*0.48, H*0.76, 46);
+  emoji("🦑", W*0.91, H*0.60, 42);
+  emoji("🐳", W*0.27, H*0.82, 58);
+}
+
+// ── Draw background ───────────────────────────────────────────────────────
+function drawBackground() {
+  const W = canvas.width, H = canvas.height;
+
+  // Ocean gets its own rich scene — skip the generic path
+  if (BACKGROUND === "ocean") { drawOceanBackground(W, H); return; }
+
+  // Sky / water gradient (supports optional mid-stop for richer scenes)
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, theme.top);
+  if (theme.mid) grad.addColorStop(theme.midAt ?? 0.4, theme.mid);
+  grad.addColorStop(1, theme.bottom);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Tiny stars for space theme
+  if (BACKGROUND === "space") {
+    for (const s of stars) {
+      ctx.save();
+      ctx.globalAlpha = s.a;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Scenery decorations (relative positions so they scale with window)
+  for (const d of theme.deco) {
+    emoji(d.e, d.rx * W, d.ry * H, d.s);
+  }
+
+  // Ground strip at the bottom
+  ctx.fillStyle = theme.ground;
+  ctx.fillRect(0, H - 38, W, 38);
+}
+
+// ── Spawn a new item at a random x ────────────────────────────────────────
+function spawnItem() {
+  const margin = 40;
+  const fromBoat = BACKGROUND === "ocean";
+  items.push({
+    x: fromBoat ? boat.x : margin + Math.random() * (canvas.width - margin * 2),
+    y: fromBoat ? boat.y + boat.size / 2 : -36,
+    size: 54,
+  });
+}
+
+// ── Splash effect on catch ────────────────────────────────────────────────
+function addSplash(x, y) {
+  for (let i = 0; i < 3; i++) {
+    splashes.push({ x, y, r: i * 10, maxR: 65 + i * 20, speed: 3 + i, alpha: 0.9 });
+  }
+}
+
+// ── Update game state ─────────────────────────────────────────────────────
+function update() {
+  const W = canvas.width;
+
+  // Arrow key movement
+  if (keys["ArrowLeft"])  player.x -= player.speed;
+  if (keys["ArrowRight"]) player.x += player.speed;
+
+  // Smooth follow toward touch position
+  if (touchX !== null) {
+    const diff = touchX - player.x;
+    player.x += Math.sign(diff) * Math.min(Math.abs(diff), player.speed * 2);
+  }
+
+  // Clamp player inside screen
+  const half = player.size / 2;
+  player.x = Math.max(half, Math.min(W - half, player.x));
+
+  // Sail the boat across the screen (ocean theme)
+  if (BACKGROUND === "ocean") {
+    boat.y  = canvas.height * 0.29;
+    boat.x += boat.speed;
+    if (boat.x > canvas.width + boat.size) boat.x = -boat.size;
+  }
+
+  // Spawn items on a timer
+  spawnTimer++;
+  if (spawnTimer >= SPAWN_EVERY) {
+    spawnItem();
+    spawnTimer = 0;
+  }
+
+  // Player sits just above the ground
+  const playerY = canvas.height - 60;
+
+  // Move items and check for catches
+  items = items.filter(item => {
+    item.y += FALL_SPEED;
+
+    // Catch: distance between item center and player center
+    const dx   = item.x - player.x;
+    const dy   = item.y - playerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const hit  = (player.size + item.size) / 2.5; // generous hitbox
+
+    if (dist < hit) {
+      score++;
+      scoreEl.textContent = `${ITEM_EMOJI} ${score}`;
+      addSplash(player.x, playerY);
+      return false; // caught! remove item
+    }
+
+    // Missed — fell off the bottom
+    if (item.y >= canvas.height + 50) {
+      lives--;
+      updateLives();
+      if (lives <= 0) gameOver = true;
+      return false;
+    }
+    return true;
+  });
+
+  // Advance and expire wave-ring splashes
+  for (const s of splashes) {
+    s.r     += s.speed;
+    s.alpha  = (1 - s.r / s.maxR) * 0.85;
+  }
+  splashes = splashes.filter(s => s.r < s.maxR);
+}
+
+// ── Draw everything ───────────────────────────────────────────────────────
+function draw() {
+  drawBackground();
+
+  // Sailboat sails behind the falling items (ocean theme)
+  if (BACKGROUND === "ocean") {
+    emoji("⛵", boat.x, boat.y, boat.size);
+  }
+
+  // Falling items
+  for (const item of items) {
+    emoji(ITEM_EMOJI, item.x, item.y, item.size);
+  }
+
+  // Wave-ring splash on each catch
+  for (const s of splashes) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, s.alpha);
+    ctx.strokeStyle = "#00e5ff";
+    ctx.lineWidth   = 3;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Player character
+  const playerY = canvas.height - 60;
+  emoji(PLAYER_EMOJI, player.x, playerY, player.size);
+}
+
+// ── Game over overlay ─────────────────────────────────────────────────────
+function drawGameOver() {
+  const W = canvas.width, H = canvas.height;
+
+  // Dark translucent overlay
+  ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+  ctx.fillRect(0, 0, W, H);
+
+  // Sad face
+  emoji("😢", W / 2, H / 2 - 90, 110);
+
+  // "GAME OVER" heading
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.font         = `bold ${Math.min(72, W / 9)}px "Arial Rounded MT Bold", Arial`;
+  ctx.fillStyle    = "#fff";
+  ctx.fillText("GAME OVER!", W / 2, H / 2 + 15);
+
+  // Final score
+  ctx.font      = `bold ${Math.min(40, W / 14)}px "Arial Rounded MT Bold", Arial`;
+  ctx.fillStyle = "#ffe066";
+  ctx.fillText(`You caught ${score} ${ITEM_EMOJI}`, W / 2, H / 2 + 75);
+
+  // Replay prompt
+  ctx.font      = `${Math.min(26, W / 22)}px Arial`;
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fillText("Tap or press any key to play again!", W / 2, H / 2 + 135);
+}
+
+// ── Restart ───────────────────────────────────────────────────────────────
+function restart() {
+  score    = 0;
+  lives    = 3;
+  items    = [];
+  spawnTimer = 0;
+  gameOver   = false;
+  player.x   = canvas.width / 2;
+  scoreEl.textContent = `${ITEM_EMOJI} 0`;
+  updateLives();
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────
+function loop() {
+  if (!gameOver) update();
+  draw();
+  if (gameOver) drawGameOver();
+  requestAnimationFrame(loop);
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────
+player.x = canvas.width / 2;
+loop();
+</script>
+</body>
+</html>
